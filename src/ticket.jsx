@@ -126,64 +126,150 @@ async function verifyPin(pin, pinHash) {
 }
 
 // --- Shared state hook ---
-function useLocalStorageQueue() {
-  const [queue, setQueue] = useState(() => readQueue());
-  const [settings, setSettings] = useState(() => readSettings());
-  const [admin, setAdmin] = useState(() => readAdmin());
+// function useLocalStorageQueue() {
+//   const [queue, setQueue] = useState(() => readQueue());
+//   const [settings, setSettings] = useState(() => readSettings());
+//   const [admin, setAdmin] = useState(() => readAdmin());
 
-  useEffect(() => {
-    const onStorage = (e) => {
-      if (e.key === STORAGE_KEY) setQueue(readQueue());
-      if (e.key === SETTINGS_KEY) setSettings(readSettings());
-      if (e.key === ADMIN_STORAGE_KEY) setAdmin(readAdmin());
-    };
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-  }, []);
+//   useEffect(() => {
+//     const onStorage = (e) => {
+//       if (e.key === STORAGE_KEY) setQueue(readQueue());
+//       if (e.key === SETTINGS_KEY) setSettings(readSettings());
+//       if (e.key === ADMIN_STORAGE_KEY) setAdmin(readAdmin());
+//     };
+//     window.addEventListener("storage", onStorage);
+//     return () => window.removeEventListener("storage", onStorage);
+//   }, []);
 
-  const addTicket = (name) => {
-    const q = readQueue();
-    const ticket = {
-      id: crypto.randomUUID(),
-      number: nextQueueNumber(q),
-      name: name.trim(),
-      status: "waiting", // waiting | done | canceled
-      createdAt: Date.now(),
-    };
-    const next = [...q, ticket];
-    writeQueue(next);
-    setQueue(next);
-    return ticket;
+//   const addTicket = (name) => {
+//     const q = readQueue();
+//     const ticket = {
+//       id: crypto.randomUUID(),
+//       number: nextQueueNumber(q),
+//       name: name.trim(),
+//       status: "waiting", // waiting | done | canceled
+//       createdAt: Date.now(),
+//     };
+//     const next = [...q, ticket];
+//     writeQueue(next);
+//     setQueue(next);
+//     return ticket;
+//   };
+
+//   const updateTicket = (id, patch) => {
+//     const next = queue.map((t) => (t.id === id ? { ...t, ...patch } : t));
+//     writeQueue(next);
+//     setQueue(next);
+//   };
+
+//   const removeTicket = (id) => {
+//     const next = queue.filter((t) => t.id !== id);
+//     writeQueue(next);
+//     setQueue(next);
+//   };
+
+//   const clearAll = () => {
+//     writeQueue([]);
+//     setQueue([]);
+//   };
+
+//   const saveSettings = (patch) => {
+//     const next = { ...settings, ...patch };
+//     writeSettings(next);
+//     setSettings(next);
+//   };
+
+//   const setAdminPinHash = (pinHash) => {
+//     const next = { ...admin, pinHash };
+//     writeAdmin(next);
+//     setAdmin(next);
+//   };
+
+//   return {
+//     queue,
+//     addTicket,
+//     updateTicket,
+//     removeTicket,
+//     clearAll,
+//     settings,
+//     saveSettings,
+//     admin,
+//     setAdminPinHash,
+//   };
+// }
+
+function useApiQueue() {
+  const [queue, setQueue] = useState([]);
+  const [settings, setSettings] = useState({
+    branchName: "NU Sanskriti",
+    avgMinutesPerTicket: 3,
+  });
+  const [admin, setAdmin] = useState({ pinHash: null });
+
+  // --- Fetch all tickets from the DB on load
+  const fetchQueue = async () => {
+    try {
+      const res = await fetch("/api/tickets");
+      const { data } = await res.json();
+      setQueue(data || []);
+    } catch (err) {
+      console.error("Error fetching queue:", err);
+    }
   };
 
-  const updateTicket = (id, patch) => {
-    const next = queue.map((t) => (t.id === id ? { ...t, ...patch } : t));
-    writeQueue(next);
-    setQueue(next);
+  // --- Add new ticket
+  const addTicket = async (name) => {
+    try {
+      const res = await fetch("/api/tickets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const { data } = await res.json();
+      setQueue((prev) => [...prev, ...data]);
+      return data[0];
+    } catch (err) {
+      console.error("Error adding ticket:", err);
+    }
   };
 
-  const removeTicket = (id) => {
-    const next = queue.filter((t) => t.id !== id);
-    writeQueue(next);
-    setQueue(next);
+  // --- Update ticket status (done/canceled)
+  const updateTicket = async (id, patch) => {
+    try {
+      const res = await fetch(`/api/tickets/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      const { data } = await res.json();
+      setQueue((prev) =>
+        prev.map((t) => (t.id === id ? { ...t, ...data[0] } : t))
+      );
+    } catch (err) {
+      console.error("Error updating ticket:", err);
+    }
   };
 
-  const clearAll = () => {
-    writeQueue([]);
+  // --- Remove or clear tickets
+  const removeTicket = async (id) => {
+    await fetch(`/api/tickets/${id}`, { method: "DELETE" });
+    setQueue((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  const clearAll = async () => {
+    if (!confirm("Clear all tickets?")) return;
+    await fetch("/api/tickets/clear", { method: "DELETE" });
     setQueue([]);
   };
 
-  const saveSettings = (patch) => {
-    const next = { ...settings, ...patch };
-    writeSettings(next);
-    setSettings(next);
-  };
+  // --- Settings / admin remain local for now
+  const saveSettings = (patch) =>
+    setSettings((prev) => ({ ...prev, ...patch }));
+  const setAdminPinHash = (pinHash) => setAdmin({ pinHash });
 
-  const setAdminPinHash = (pinHash) => {
-    const next = { ...admin, pinHash };
-    writeAdmin(next);
-    setAdmin(next);
-  };
+  useEffect(() => {
+    fetchQueue();
+  }, []);
 
   return {
     queue,
@@ -756,7 +842,7 @@ function ChangePinForm() {
 
 // --- App shell ---
 function AppShell({ children }) {
-  const { settings } = useLocalStorageQueue();
+  const { settings } = useApiQueue();
   return (
     <div className="min-h-screen bg-gradient-to-b from-sky-50 to-white text-gray-900">
       <Banner />
@@ -770,7 +856,8 @@ function AppShell({ children }) {
 }
 
 export default function Ticket() {
-  const state = useLocalStorageQueue();
+  // const state = useLocalStorageQueue();
+  const state = useApiQueue();
   return (
     <BrowserRouter>
       <AppShell>
