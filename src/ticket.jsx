@@ -7,6 +7,7 @@ import {
   Navigate,
   useNavigate,
 } from "react-router-dom";
+import { useApiQueue } from "./useApiQueue";
 import bannerImg from "./assets/nu-banner.png";
 
 // React Router version: Separate Client (/) and Admin (/admin) routes
@@ -17,35 +18,6 @@ const STORAGE_KEY = "ticket_queue_v1";
 const SETTINGS_KEY = "ticket_queue_settings_v1";
 const ADMIN_STORAGE_KEY = "ticket_queue_admin_v1"; // { pinHash: string }
 const ADMIN_SESSION_KEY = "ticket_queue_admin_session_v1"; // "true" when authed for this tab
-
-// --- Storage helpers ---
-function readQueue() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch (e) {
-    console.error(e);
-    return [];
-  }
-}
-
-function writeQueue(q) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(q));
-}
-
-function readSettings() {
-  try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
-    return raw
-      ? JSON.parse(raw)
-      : {
-          avgMinutesPerTicket: 3,
-          branchName: "Mehendi",
-        };
-  } catch (e) {
-    return { avgMinutesPerTicket: 3, branchName: "NU Sanskriti" };
-  }
-}
 
 function Banner() {
   return (
@@ -76,10 +48,6 @@ function Toast({ open, children }) {
   );
 }
 
-function writeSettings(s) {
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
-}
-
 function readAdmin() {
   try {
     const raw = localStorage.getItem(ADMIN_STORAGE_KEY);
@@ -100,12 +68,6 @@ function isAdminSessionAuthed() {
 function setAdminSessionAuthed(v) {
   if (v) sessionStorage.setItem(ADMIN_SESSION_KEY, "true");
   else sessionStorage.removeItem(ADMIN_SESSION_KEY);
-}
-
-// --- Queue helpers ---
-function nextQueueNumber(queue) {
-  if (!queue.length) return 1;
-  return Math.max(...queue.map((t) => t.number)) + 1;
 }
 
 // --- Hashing PIN helpers ---
@@ -197,92 +159,6 @@ async function verifyPin(pin, pinHash) {
 //     setAdminPinHash,
 //   };
 // }
-
-function useApiQueue() {
-  const [queue, setQueue] = useState([]);
-  const [settings, setSettings] = useState({
-    branchName: "NU Sanskriti",
-    avgMinutesPerTicket: 3,
-  });
-  const [admin, setAdmin] = useState({ pinHash: null });
-
-  // --- Fetch all tickets from the DB on load
-  const fetchQueue = async () => {
-    try {
-      const res = await fetch("/api/tickets");
-      const { data } = await res.json();
-      setQueue(data || []);
-    } catch (err) {
-      console.error("Error fetching queue:", err);
-    }
-  };
-
-  // --- Add new ticket
-  const addTicket = async (name) => {
-    try {
-      const res = await fetch("/api/tickets", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
-      });
-      const { data } = await res.json();
-      setQueue((prev) => [...prev, ...data]);
-      return data[0];
-    } catch (err) {
-      console.error("Error adding ticket:", err);
-    }
-  };
-
-  // --- Update ticket status (done/canceled)
-  const updateTicket = async (id, patch) => {
-    try {
-      const res = await fetch(`/api/tickets/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(patch),
-      });
-      const { data } = await res.json();
-      setQueue((prev) =>
-        prev.map((t) => (t.id === id ? { ...t, ...data[0] } : t))
-      );
-    } catch (err) {
-      console.error("Error updating ticket:", err);
-    }
-  };
-
-  // --- Remove or clear tickets
-  const removeTicket = async (id) => {
-    await fetch(`/api/tickets/${id}`, { method: "DELETE" });
-    setQueue((prev) => prev.filter((t) => t.id !== id));
-  };
-
-  const clearAll = async () => {
-    if (!confirm("Clear all tickets?")) return;
-    await fetch("/api/tickets/clear", { method: "DELETE" });
-    setQueue([]);
-  };
-
-  // --- Settings / admin remain local for now
-  const saveSettings = (patch) =>
-    setSettings((prev) => ({ ...prev, ...patch }));
-  const setAdminPinHash = (pinHash) => setAdmin({ pinHash });
-
-  useEffect(() => {
-    fetchQueue();
-  }, []);
-
-  return {
-    queue,
-    addTicket,
-    updateTicket,
-    removeTicket,
-    clearAll,
-    settings,
-    saveSettings,
-    admin,
-    setAdminPinHash,
-  };
-}
 
 // --- UI atoms ---
 function Section({ title, children, actions }) {
