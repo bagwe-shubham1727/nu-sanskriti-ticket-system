@@ -494,7 +494,7 @@ export default function Ticket() {
                 setEventId={setClientEventId}
                 queue={client.queue}
                 addTicket={client.addTicket}
-                settings={{ branchName: "Event", avgMinutesPerTicket: 3 }}
+                settings={{ branchName: "Event", avgMinutesPerTicket: 15 }}
                 events={events}
                 eventsLoading={eventsLoading}
               />
