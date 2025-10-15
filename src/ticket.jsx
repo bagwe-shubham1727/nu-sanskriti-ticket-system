@@ -329,7 +329,14 @@ function AdminLoginEvent({ selectedEventId, onSelectEvent, onAuthed }) {
 
 /* ---------- Admin Page (event-aware) ---------- */
 
-function AdminPage({ eventId, queue, updateTicket, clearAll, settings }) {
+function AdminPage({
+  eventId,
+  eventName,
+  queue,
+  updateTicket,
+  clearAll,
+  settings,
+}) {
   const waiting = useMemo(
     () => queue.filter((t) => t.status === "waiting"),
     [queue]
@@ -345,27 +352,12 @@ function AdminPage({ eventId, queue, updateTicket, clearAll, settings }) {
     <main className="max-w-4xl mx-auto px-4 pb-12 space-y-6">
       <Section
         title="Queue Dashboard"
-        actions={
-          <div className="flex items-center gap-2">
-            <Pill>{waiting.length} waiting</Pill>
-            <Pill>
-              next #
-              {waiting.slice().sort((a, b) => a.number - b.number)[0]?.number ??
-                "—"}
-            </Pill>
-            <button
-              onClick={logout}
-              className="ml-2 px-3 py-1.5 rounded-lg text-xs font-bold text-white border bg-gray-900 hover:bg-gray-800 transition"
-            >
-              Logout
-            </button>
-          </div>
-        }
+        /* ... */
       >
         <div className="grid md:grid-cols-3 gap-3 mb-4">
           <div className="rounded-xl border p-3 bg-white">
             <div className="text-xs text-gray-500">Event</div>
-            <div className="font-medium">{settings.branchName}</div>
+            <div className="font-medium">{eventName || "—"}</div> {/* ← here */}
           </div>
           <div className="rounded-xl border p-3 bg-white">
             <div className="text-xs text-gray-500">Avg mins per ticket</div>
@@ -376,62 +368,7 @@ function AdminPage({ eventId, queue, updateTicket, clearAll, settings }) {
             <div className="font-medium">{queue.length}</div>
           </div>
         </div>
-
-        {waiting.length === 0 ? (
-          <p className="text-sm text-gray-600">No active tickets.</p>
-        ) : (
-          <ul className="space-y-2">
-            {waiting
-              .slice()
-              .sort((a, b) => a.number - b.number)
-              .map((t) => (
-                <li
-                  key={t.id}
-                  className="flex items-center justify-between rounded-xl border border-gray-200 bg-white p-3"
-                >
-                  <div className="flex items-center gap-4">
-                    <span className="text-xl font-extrabold tabular-nums">
-                      #{t.number}
-                    </span>
-                    <div>
-                      <div className="font-medium">{t.name}</div>
-                      <div className="text-xs text-gray-500">
-                        Created{" "}
-                        {new Date(
-                          t.created_at || t.createdAt
-                        ).toLocaleTimeString()}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => updateTicket(t.id, { status: "done" })}
-                      className="px-3 py-1.5 rounded-lg text-sm bg-green-600 text-white hover:bg-green-700"
-                    >
-                      Complete
-                    </button>
-                    <button
-                      onClick={() => updateTicket(t.id, { status: "canceled" })}
-                      className="px-3 py-1.5 rounded-lg text-sm bg-rose-600 text-white hover:bg-rose-700"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </li>
-              ))}
-          </ul>
-        )}
-      </Section>
-
-      <Section title="Controls">
-        <button
-          onClick={() =>
-            confirm("Clear ALL tickets for this event?") && clearAll()
-          }
-          className="px-3 py-1.5 rounded-lg text-xs font-bold text-white border bg-gray-900 hover:bg-gray-800 transition"
-        >
-          Clear All
-        </button>
+        {/* ...rest unchanged... */}
       </Section>
     </main>
   );
@@ -474,6 +411,8 @@ export default function Ticket() {
   });
   const adminQueue = useApiQueue(adminEventId);
 
+  const adminEvent = events.find((e) => e.id === adminEventId);
+
   return (
     <BrowserRouter>
       <AppShell>
@@ -500,6 +439,7 @@ export default function Ticket() {
               sessionStorage.getItem(`admin_${adminEventId}`) === "true" ? (
                 <AdminPage
                   eventId={adminEventId}
+                  eventName={adminEvent?.name || "—"}
                   queue={adminQueue.queue}
                   updateTicket={adminQueue.updateTicket}
                   clearAll={adminQueue.clearAll}
