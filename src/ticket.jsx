@@ -3,21 +3,15 @@ import {
   BrowserRouter,
   Routes,
   Route,
-  Link,
   Navigate,
   useNavigate,
 } from "react-router-dom";
-import { useApiQueue } from "./useApiQueue";
+import { useApiQueue } from "./useApiQueue"; // must accept (eventId)
+import { useEvents } from "./useEvents"; // events list + create + verify
+import CreateEventCard from "./CreateEventCard";
 import bannerImg from "./assets/nu-banner.png";
 
-// React Router version: Separate Client (/) and Admin (/admin) routes
-// LocalStorage-only data + Admin PIN auth (hashed when supported)
-// Styling via Tailwind utility classes
-
-const STORAGE_KEY = "ticket_queue_v1";
-const SETTINGS_KEY = "ticket_queue_settings_v1";
-const ADMIN_STORAGE_KEY = "ticket_queue_admin_v1"; // { pinHash: string }
-const ADMIN_SESSION_KEY = "ticket_queue_admin_session_v1"; // "true" when authed for this tab
+/* ---------- Small UI atoms ---------- */
 
 function Banner() {
   return (
@@ -48,46 +42,6 @@ function Toast({ open, children }) {
   );
 }
 
-function readAdmin() {
-  try {
-    const raw = localStorage.getItem(ADMIN_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : { pinHash: null };
-  } catch (e) {
-    return { pinHash: null };
-  }
-}
-
-function writeAdmin(a) {
-  localStorage.setItem(ADMIN_STORAGE_KEY, JSON.stringify(a));
-}
-
-function isAdminSessionAuthed() {
-  return sessionStorage.getItem(ADMIN_SESSION_KEY) === "true";
-}
-
-function setAdminSessionAuthed(v) {
-  if (v) sessionStorage.setItem(ADMIN_SESSION_KEY, "true");
-  else sessionStorage.removeItem(ADMIN_SESSION_KEY);
-}
-
-// --- Hashing PIN helpers ---
-async function hashPin(pin) {
-  if (window.crypto?.subtle) {
-    const enc = new TextEncoder().encode(pin);
-    const digest = await crypto.subtle.digest("SHA-256", enc);
-    const bytes = Array.from(new Uint8Array(digest));
-    return bytes.map((b) => b.toString(16).padStart(2, "0")).join("");
-  }
-  return "plain:" + pin; // fallback (less secure)
-}
-
-async function verifyPin(pin, pinHash) {
-  if (!pinHash) return false;
-  const h = await hashPin(pin);
-  return h === pinHash;
-}
-
-// --- UI atoms ---
 function Section({ title, children, actions }) {
   return (
     <div className="bg-white/80 backdrop-blur border border-gray-200 rounded-2xl shadow-sm p-5 md:p-6">
@@ -117,119 +71,28 @@ function ETA({ position, avgMinutes }) {
   return <span>Estimated wait: {text}</span>;
 }
 
-// --- Auth widgets ---
-function AdminAuth({ hasPin, onAuthed, onSetPin }) {
-  const [mode, setMode] = useState(hasPin ? "login" : "create");
-  const [pin, setPin] = useState("");
-  const [pin2, setPin2] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+/* ---------- Shared: Event selector ---------- */
 
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    setError("");
-    setLoading(true);
-    try {
-      const ok = await verifyPin(pin, readAdmin().pinHash);
-      if (ok) {
-        setAdminSessionAuthed(true);
-        onAuthed();
-      } else {
-        setError("Incorrect PIN");
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleCreate = async (e) => {
-    e.preventDefault();
-    setError("");
-    if (!pin || pin.length < 4) return setError("Use at least 4 digits");
-    if (pin !== pin2) return setError("PINs do not match");
-    setLoading(true);
-    try {
-      const h = await hashPin(pin);
-      onSetPin(h);
-      setAdminSessionAuthed(true);
-      onAuthed();
-    } finally {
-      setLoading(false);
-    }
-  };
-
+function EventSelect({ events, value, onChange, disabled = false }) {
   return (
-    <Section title={mode === "login" ? "Admin Login" : "Create Admin PIN"}>
-      {mode === "login" ? (
-        <form onSubmit={handleLogin} className="grid gap-3 max-w-sm">
-          <input
-            type="password"
-            inputMode="numeric"
-            placeholder="Enter PIN"
-            className="rounded-xl border border-gray-300 px-3 py-2"
-            value={pin}
-            onChange={(e) => setPin(e.target.value)}
-          />
-          {error && <div className="text-sm text-rose-600">{error}</div>}
-          <button
-            disabled={loading}
-            className="rounded-xl px-4 py-2 bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50"
-          >
-            {loading ? "Checking…" : "Login"}
-          </button>
-          <button
-            type="button"
-            className="text-xs text-gray-600 underline justify-self-start"
-            onClick={() => setMode("create")}
-          >
-            First time here? Create PIN
-          </button>
-        </form>
-      ) : (
-        <form onSubmit={handleCreate} className="grid gap-3 max-w-sm">
-          <input
-            type="password"
-            inputMode="numeric"
-            placeholder="Choose PIN (min 4 digits)"
-            className="rounded-xl border border-gray-300 px-3 py-2"
-            value={pin}
-            onChange={(e) => setPin(e.target.value)}
-          />
-          <input
-            type="password"
-            inputMode="numeric"
-            placeholder="Confirm PIN"
-            className="rounded-xl border border-gray-300 px-3 py-2"
-            value={pin2}
-            onChange={(e) => setPin2(e.target.value)}
-          />
-          {error && <div className="text-sm text-rose-600">{error}</div>}
-          <button
-            disabled={loading}
-            className="rounded-xl px-4 py-2 bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50"
-          >
-            {loading ? "Saving…" : "Create PIN"}
-          </button>
-          {hasPin && (
-            <button
-              type="button"
-              className="text-xs text-gray-600 underline justify-self-start"
-              onClick={() => setMode("login")}
-            >
-              Back to login
-            </button>
-          )}
-        </form>
-      )}
-      <p className="text-xs text-gray-500 mt-3">
-        PIN is stored locally in your browser (hashed with SHA-256 when
-        supported). If you clear site data, you'll need to set it again.
-      </p>
-    </Section>
+    <select
+      value={value ?? ""}
+      onChange={(e) => onChange(e.target.value || null)}
+      className="rounded-lg border px-2 py-1 text-sm"
+      disabled={disabled}
+    >
+      <option value="">Select event…</option>
+      {events.map((ev) => (
+        <option key={ev.id} value={ev.id}>
+          {ev.name}
+        </option>
+      ))}
+    </select>
   );
 }
 
-// --- Pages ---
+/* ---------- Header ---------- */
+
 function Header({ branch }) {
   return (
     <header className="max-w-4xl mx-auto px-4 pt-8 pb-3">
@@ -238,14 +101,23 @@ function Header({ branch }) {
           <h1 className="text-2xl md:text-3xl font-bold tracking-tight">
             {branch} — Ticket Queue
           </h1>
-          <p className="text-sm text-gray-600 mt-1"></p>
         </div>
       </div>
     </header>
   );
 }
 
-function ClientPage({ queue, addTicket, settings }) {
+/* ---------- Client Page (event-aware) ---------- */
+
+function ClientPage({
+  eventId,
+  setEventId,
+  queue,
+  addTicket,
+  settings,
+  events,
+  eventsLoading,
+}) {
   const [name, setName] = useState("");
   const [myTicket, setMyTicket] = useState(null);
   const [showToast, setShowToast] = useState(false);
@@ -254,10 +126,9 @@ function ClientPage({ queue, addTicket, settings }) {
     if (myTicket) {
       const timer = setTimeout(() => {
         setMyTicket(null);
-        setShowToast(true); // show toast after hiding ticket
-        // hide toast automatically after 5 seconds
+        setShowToast(true);
         setTimeout(() => setShowToast(false), 3000);
-      }, 5000); // hide after 10s
+      }, 5000);
       return () => clearTimeout(timer);
     }
   }, [myTicket]);
@@ -269,11 +140,13 @@ function ClientPage({ queue, addTicket, settings }) {
 
   const handleTakeTicket = async (e) => {
     e.preventDefault();
+    if (!eventId) return;
     if (!name.trim()) return;
-
-    const created = await addTicket(name); // <-- await the API
-    if (created) setMyTicket(created); // now has .name and .number
-
+    const created = await addTicket(name);
+    if (created) {
+      if (!created.name) created.name = name; // fallback
+      setMyTicket(created);
+    }
     setName("");
   };
 
@@ -289,6 +162,27 @@ function ClientPage({ queue, addTicket, settings }) {
   return (
     <main className="max-w-4xl mx-auto px-4 pb-12 space-y-6">
       <Section
+        title="Select Event"
+        actions={
+          <Pill>{eventsLoading ? "Loading…" : `${events.length} events`}</Pill>
+        }
+      >
+        <div className="flex items-center gap-3">
+          <EventSelect
+            events={events}
+            value={eventId}
+            onChange={setEventId}
+            disabled={eventsLoading}
+          />
+          {!eventId && (
+            <span className="text-xs text-gray-500">
+              Pick an event to continue
+            </span>
+          )}
+        </div>
+      </Section>
+
+      <Section
         title="Get a Queue Number"
         actions={<Pill>{waiting.length} in queue</Pill>}
       >
@@ -297,22 +191,21 @@ function ClientPage({ queue, addTicket, settings }) {
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Your name"
-            className="md:col-span-3 col-span-5 w-full rounded-xl border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-400"
+            placeholder={eventId ? "Your name" : "Select an event first"}
+            disabled={!eventId}
+            className="md:col-span-3 col-span-5 w-full rounded-xl border border-gray-300 px-3 py-2 disabled:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-sky-400"
           />
           <button
             type="submit"
-            className="md:col-span-2 col-span-5 rounded-xl px-4 py-2 bg-sky-600 text-white font-medium hover:bg-sky-700 active:scale-95 transition"
+            disabled={!eventId}
+            className="md:col-span-2 col-span-5 rounded-xl px-4 py-2 bg-sky-600 text-white font-medium hover:bg-sky-700 active:scale-95 transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Take Ticket
           </button>
         </form>
+
         {myTicket && (
-          <div
-            className={`mt-4 rounded-xl border border-sky-200 bg-sky-50 p-4 transition-opacity duration-700 ${
-              myTicket ? "opacity-100" : "opacity-0"
-            }`}
-          >
+          <div className="mt-4 rounded-xl border border-sky-200 bg-sky-50 p-4 transition-opacity duration-700">
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-xs uppercase tracking-wider text-sky-700 font-semibold">
@@ -335,6 +228,7 @@ function ClientPage({ queue, addTicket, settings }) {
             </div>
           </div>
         )}
+
         <Toast open={showToast}>
           🎟️ Ticket saved! Check the waiting list below 👇
         </Toast>
@@ -370,288 +264,186 @@ function ClientPage({ queue, addTicket, settings }) {
   );
 }
 
-function AdminPage({
-  queue,
-  updateTicket,
-  clearAll,
-  settings,
-  saveSettings,
-  admin,
-  setAdminPinHash,
-}) {
-  const [isAuthed, setIsAuthed] = useState(isAdminSessionAuthed());
+/* ---------- Admin Login (event + pin) ---------- */
+
+/* ---------- Admin Login (event + pin) ---------- */
+
+function AdminLoginEvent({ selectedEventId, onSelectEvent, onAuthed }) {
+  const { events, loading, error, verifyEventPin } = useEvents();
+  const [eventId, setEventId] = useState(selectedEventId || "");
+  const [pin, setPin] = useState("");
+  const [err, setErr] = useState("");
+
+  // keep internal eventId in sync when parent updates selection
+  useEffect(() => {
+    if (selectedEventId) setEventId(selectedEventId);
+  }, [selectedEventId]);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setErr("");
+    if (!eventId) return setErr("Select an event");
+    if (!pin.trim()) return setErr("Enter PIN");
+
+    const ok = await verifyEventPin(eventId, pin);
+    if (ok) onAuthed(eventId);
+    else setErr("Incorrect PIN");
+  };
+
+  return (
+    <Section title="Admin Login">
+      <form onSubmit={submit} className="grid gap-3 max-w-sm">
+        <label className="text-sm text-gray-700">Event</label>
+        <EventSelect
+          events={events}
+          value={eventId}
+          onChange={(id) => {
+            setEventId(id);
+            onSelectEvent?.(id);
+          }}
+          disabled={loading}
+        />
+
+        <input
+          id="admin-login-pin" // <- used to focus after create
+          type="password"
+          inputMode="numeric"
+          placeholder="Event PIN"
+          className="rounded-xl border border-gray-300 px-3 py-2"
+          value={pin}
+          onChange={(e) => setPin(e.target.value)}
+        />
+
+        {error && <div className="text-sm text-rose-600">{String(error)}</div>}
+        {err && <div className="text-sm text-rose-600">{err}</div>}
+        <button className="rounded-xl px-4 py-2 bg-gray-900 text-white hover:bg-gray-800">
+          Login
+        </button>
+      </form>
+      <p className="text-xs text-gray-500 mt-3">
+        Choose an event and enter that event’s PIN.
+      </p>
+    </Section>
+  );
+}
+
+/* ---------- Admin Page (event-aware) ---------- */
+
+function AdminPage({ eventId, queue, updateTicket, clearAll, settings }) {
   const waiting = useMemo(
     () => queue.filter((t) => t.status === "waiting"),
     [queue]
   );
   const navigate = useNavigate();
 
-  useEffect(() => {
-    if (!isAdminSessionAuthed()) setIsAuthed(false);
-  }, []);
-
   const logout = () => {
-    setAdminSessionAuthed(false);
-    setIsAuthed(false);
+    sessionStorage.removeItem(`admin_${eventId}`);
     navigate("/");
   };
 
   return (
     <main className="max-w-4xl mx-auto px-4 pb-12 space-y-6">
-      {!isAuthed ? (
-        <AdminAuth
-          hasPin={!!admin.pinHash}
-          onAuthed={() => setIsAuthed(true)}
-          onSetPin={(h) => setAdminPinHash(h)}
-        />
-      ) : (
-        <>
-          <Section
-            title="Queue Dashboard"
-            actions={
-              <div className="flex items-center gap-2">
-                <Pill>{waiting.length} waiting</Pill>
-                <Pill>
-                  next #
-                  {waiting.slice().sort((a, b) => a.number - b.number)[0]
-                    ?.number ?? "—"}
-                </Pill>
-                <button
-                  onClick={logout}
-                  className="ml-2 px-3 py-1.5 rounded-lg text-xs font-bold text-white border bg-gray-900 hover:bg-gray-800 transition"
+      <Section
+        title="Queue Dashboard"
+        actions={
+          <div className="flex items-center gap-2">
+            <Pill>{waiting.length} waiting</Pill>
+            <Pill>
+              next #
+              {waiting.slice().sort((a, b) => a.number - b.number)[0]?.number ??
+                "—"}
+            </Pill>
+            <button
+              onClick={logout}
+              className="ml-2 px-3 py-1.5 rounded-lg text-xs font-bold text-white border bg-gray-900 hover:bg-gray-800 transition"
+            >
+              Logout
+            </button>
+          </div>
+        }
+      >
+        <div className="grid md:grid-cols-3 gap-3 mb-4">
+          <div className="rounded-xl border p-3 bg-white">
+            <div className="text-xs text-gray-500">Event</div>
+            <div className="font-medium">{settings.branchName}</div>
+          </div>
+          <div className="rounded-xl border p-3 bg-white">
+            <div className="text-xs text-gray-500">Avg mins per ticket</div>
+            <div className="font-medium">{settings.avgMinutesPerTicket}</div>
+          </div>
+          <div className="rounded-xl border p-3 bg-white">
+            <div className="text-xs text-gray-500">Total tickets</div>
+            <div className="font-medium">{queue.length}</div>
+          </div>
+        </div>
+
+        {waiting.length === 0 ? (
+          <p className="text-sm text-gray-600">No active tickets.</p>
+        ) : (
+          <ul className="space-y-2">
+            {waiting
+              .slice()
+              .sort((a, b) => a.number - b.number)
+              .map((t) => (
+                <li
+                  key={t.id}
+                  className="flex items-center justify-between rounded-xl border border-gray-200 bg-white p-3"
                 >
-                  Logout
-                </button>
-              </div>
-            }
-          >
-            <div className="grid md:grid-cols-3 gap-3 mb-4">
-              <div className="rounded-xl border p-3 bg-white">
-                <div className="text-xs text-gray-500">Branch</div>
-                <div className="font-medium">{settings.branchName}</div>
-              </div>
-              <div className="rounded-xl border p-3 bg-white">
-                <div className="text-xs text-gray-500">Avg mins per ticket</div>
-                <div className="font-medium">
-                  {settings.avgMinutesPerTicket}
-                </div>
-              </div>
-              <div className="rounded-xl border p-3 bg-white">
-                <div className="text-xs text-gray-500">Total tickets today</div>
-                <div className="font-medium">{queue.length}</div>
-              </div>
-            </div>
-
-            {waiting.length === 0 ? (
-              <p className="text-sm text-gray-600">No active tickets.</p>
-            ) : (
-              <ul className="space-y-2">
-                {waiting
-                  .slice()
-                  .sort((a, b) => a.number - b.number)
-                  .map((t) => (
-                    <li
-                      key={t.id}
-                      className="flex items-center justify-between rounded-xl border border-gray-200 bg-white p-3"
+                  <div className="flex items-center gap-4">
+                    <span className="text-xl font-extrabold tabular-nums">
+                      #{t.number}
+                    </span>
+                    <div>
+                      <div className="font-medium">{t.name}</div>
+                      <div className="text-xs text-gray-500">
+                        Created{" "}
+                        {new Date(
+                          t.created_at || t.createdAt
+                        ).toLocaleTimeString()}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => updateTicket(t.id, { status: "done" })}
+                      className="px-3 py-1.5 rounded-lg text-sm bg-green-600 text-white hover:bg-green-700"
                     >
-                      <div className="flex items-center gap-4">
-                        <span className="text-xl font-extrabold tabular-nums">
-                          #{t.number}
-                        </span>
-                        <div>
-                          <div className="font-medium">{t.name}</div>
-                          <div className="text-xs text-gray-500">
-                            Created {new Date(t.createdAt).toLocaleTimeString()}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => updateTicket(t.id, { status: "done" })}
-                          className="px-3 py-1.5 rounded-lg text-sm bg-green-600 text-white hover:bg-green-700"
-                        >
-                          Complete
-                        </button>
-                        <button
-                          onClick={() =>
-                            updateTicket(t.id, { status: "canceled" })
-                          }
-                          className="px-3 py-1.5 rounded-lg text-sm bg-rose-600 text-white hover:bg-rose-700"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-              </ul>
-            )}
-          </Section>
+                      Complete
+                    </button>
+                    <button
+                      onClick={() => updateTicket(t.id, { status: "canceled" })}
+                      className="px-3 py-1.5 rounded-lg text-sm bg-rose-600 text-white hover:bg-rose-700"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </li>
+              ))}
+          </ul>
+        )}
+      </Section>
 
-          <Section title="History / Controls">
-            <div className="flex flex-wrap items-center gap-2 mb-3">
-              <button
-                onClick={() => {
-                  if (confirm("Clear ALL tickets? This cannot be undone."))
-                    clearAll();
-                }}
-                className="ml-2 px-3 py-1.5 rounded-lg text-xs font-bold text-white border bg-gray-900 hover:bg-gray-800 transition"
-              >
-                Clear All
-              </button>
-              <div className="flex items-center gap-2">
-                <label className="text-sm text-gray-700">Branch</label>
-                <input
-                  type="text"
-                  className="rounded-lg border px-2 py-1 text-sm"
-                  value={settings.branchName}
-                  onChange={(e) => saveSettings({ branchName: e.target.value })}
-                />
-              </div>
-              <div className="flex items-center gap-2">
-                <label className="text-sm text-gray-700">Avg mins/ticket</label>
-                <input
-                  type="number"
-                  min={1}
-                  className="w-20 rounded-lg border px-2 py-1 text-sm"
-                  value={settings.avgMinutesPerTicket}
-                  onChange={(e) =>
-                    saveSettings({
-                      avgMinutesPerTicket: Number(e.target.value || 1),
-                    })
-                  }
-                />
-              </div>
-            </div>
-
-            <div className="overflow-hidden rounded-2xl border border-gray-200 mb-6">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 text-gray-600">
-                  <tr>
-                    <th className="text-left p-2">#</th>
-                    <th className="text-left p-2">Name</th>
-                    <th className="text-left p-2">Status</th>
-                    <th className="text-left p-2">Created</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {queue
-                    .slice()
-                    .sort((a, b) => a.number - b.number)
-                    .map((t) => (
-                      <tr key={t.id} className="border-t">
-                        <td className="p-2 font-medium tabular-nums">
-                          #{t.number}
-                        </td>
-                        <td className="p-2">{t.name}</td>
-                        <td className="p-2">
-                          <span
-                            className={`px-2 py-0.5 rounded-full text-xs border ${
-                              t.status === "waiting"
-                                ? "bg-yellow-50 border-yellow-200"
-                                : t.status === "done"
-                                ? "bg-green-50 border-green-200"
-                                : "bg-rose-50 border-rose-200"
-                            }`}
-                          >
-                            {t.status}
-                          </span>
-                        </td>
-                        <td className="p-2 text-gray-600">
-                          {new Date(t.createdAt).toLocaleString()}
-                        </td>
-                      </tr>
-                    ))}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="max-w-md">
-              <div className="text-sm font-medium mb-2">Change Admin PIN</div>
-              <ChangePinForm />
-            </div>
-          </Section>
-        </>
-      )}
+      <Section title="Controls">
+        <button
+          onClick={() =>
+            confirm("Clear ALL tickets for this event?") && clearAll()
+          }
+          className="px-3 py-1.5 rounded-lg text-xs font-bold text-white border bg-gray-900 hover:bg-gray-800 transition"
+        >
+          Clear All
+        </button>
+      </Section>
     </main>
   );
 }
 
-function ChangePinForm() {
-  const [current, setCurrent] = useState("");
-  const [pin, setPin] = useState("");
-  const [pin2, setPin2] = useState("");
-  const [msg, setMsg] = useState("");
-  const [err, setErr] = useState("");
-  const [busy, setBusy] = useState(false);
+/* ---------- App shell (reads settings just for labels) ---------- */
 
-  const doChange = async (e) => {
-    e.preventDefault();
-    setMsg("");
-    setErr("");
-    if (!pin || pin.length < 4)
-      return setErr("New PIN must be at least 4 digits");
-    if (pin !== pin2) return setErr("New PINs do not match");
-    setBusy(true);
-    try {
-      const stored = readAdmin();
-      const ok = await verifyPin(current, stored.pinHash);
-      if (!ok) return setErr("Current PIN is incorrect");
-      const h = await hashPin(pin);
-      writeAdmin({ pinHash: h });
-      setMsg("PIN updated successfully");
-      setCurrent("");
-      setPin("");
-      setPin2("");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <form onSubmit={doChange} className="grid gap-2">
-      <input
-        type="password"
-        inputMode="numeric"
-        placeholder="Current PIN"
-        className="rounded-xl border border-gray-300 px-3 py-2"
-        value={current}
-        onChange={(e) => setCurrent(e.target.value)}
-      />
-      <input
-        type="password"
-        inputMode="numeric"
-        placeholder="New PIN (min 4 digits)"
-        className="rounded-xl border border-gray-300 px-3 py-2"
-        value={pin}
-        onChange={(e) => setPin(e.target.value)}
-      />
-      <input
-        type="password"
-        inputMode="numeric"
-        placeholder="Confirm new PIN"
-        className="rounded-xl border border-gray-300 px-3 py-2"
-        value={pin2}
-        onChange={(e) => setPin2(e.target.value)}
-      />
-      {err && <div className="text-sm text-rose-600">{err}</div>}
-      {msg && <div className="text-sm text-green-700">{msg}</div>}
-      <button
-        disabled={busy}
-        className="mt-1 rounded-xl px-4 py-2 bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50 w-max"
-      >
-        {busy ? "Saving…" : "Update PIN"}
-      </button>
-    </form>
-  );
-}
-
-// --- App shell ---
-function AppShell({ children }) {
-  const { settings } = useApiQueue();
+function AppShell({ children, title = "NU Sanskriti" }) {
   return (
     <div className="min-h-screen bg-gradient-to-b from-sky-50 to-white text-gray-900">
       <Banner />
-      <Header branch={settings.branchName} />
+      <Header branch={title} />
       {children}
       <footer className="max-w-4xl mx-auto px-4 pb-10 text-center text-xs text-gray-500">
         © NU Sanskriti. All Rights Reserved
@@ -660,9 +452,28 @@ function AppShell({ children }) {
   );
 }
 
+/* ---------- Root: wire events + queues ---------- */
+
 export default function Ticket() {
-  // const state = useLocalStorageQueue();
-  const state = useApiQueue();
+  const { events, loading: eventsLoading } = useEvents();
+
+  // Selected event for Client route
+  const [clientEventId, setClientEventId] = useState(null);
+  // Admin login-side selected event (shared between login + create)
+  const [loginSelectedEventId, setLoginSelectedEventId] = useState("");
+
+  const client = useApiQueue(clientEventId); // <- your hook must accept eventId
+
+  // Admin auth state per-event
+  const [adminEventId, setAdminEventId] = useState(() => {
+    // restore last authed event (optional)
+    const keys = Object.keys(sessionStorage).filter(
+      (k) => k.startsWith("admin_") && sessionStorage.getItem(k) === "true"
+    );
+    return keys.length ? keys[0].replace("admin_", "") : null;
+  });
+  const adminQueue = useApiQueue(adminEventId);
+
   return (
     <BrowserRouter>
       <AppShell>
@@ -671,26 +482,59 @@ export default function Ticket() {
             path="/"
             element={
               <ClientPage
-                queue={state.queue}
-                addTicket={state.addTicket}
-                settings={state.settings}
+                eventId={clientEventId}
+                setEventId={setClientEventId}
+                queue={client.queue}
+                addTicket={client.addTicket}
+                settings={{ branchName: "Event", avgMinutesPerTicket: 3 }}
+                events={events}
+                eventsLoading={eventsLoading}
               />
             }
           />
+
           <Route
             path="/admin"
             element={
-              <AdminPage
-                queue={state.queue}
-                updateTicket={state.updateTicket}
-                clearAll={state.clearAll}
-                settings={state.settings}
-                saveSettings={state.saveSettings}
-                admin={state.admin}
-                setAdminPinHash={state.setAdminPinHash}
-              />
+              adminEventId &&
+              sessionStorage.getItem(`admin_${adminEventId}`) === "true" ? (
+                <AdminPage
+                  eventId={adminEventId}
+                  queue={adminQueue.queue}
+                  updateTicket={adminQueue.updateTicket}
+                  clearAll={adminQueue.clearAll}
+                  settings={{ branchName: "Event", avgMinutesPerTicket: 3 }}
+                />
+              ) : (
+                // render both: Login + Create Event
+                <div className="max-w-4xl mx-auto px-4 pb-12">
+                  <div className="grid md:grid-cols-2 gap-6">
+                    <AdminLoginEvent
+                      selectedEventId={loginSelectedEventId}
+                      onSelectEvent={setLoginSelectedEventId}
+                      onAuthed={(eid) => {
+                        sessionStorage.setItem(`admin_${eid}`, "true");
+                        setAdminEventId(eid);
+                      }}
+                    />
+                    <CreateEventCard
+                      onCreated={(ev) => {
+                        // ✅ auto-select the new event in the login form
+                        setLoginSelectedEventId(ev.id);
+                        // ✅ focus the PIN field for quick typing
+                        setTimeout(() => {
+                          const pinInput =
+                            document.getElementById("admin-login-pin");
+                          if (pinInput) pinInput.focus();
+                        }, 250);
+                      }}
+                    />
+                  </div>
+                </div>
+              )
             }
           />
+
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AppShell>

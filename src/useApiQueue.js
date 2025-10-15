@@ -1,26 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 
-export function useApiQueue() {
+/**
+ * Queue hook (event-scoped):
+ * - fetchQueue(): GET /api/tickets?event=:eventId
+ * - addTicket(name): POST /api/tickets { name, event_id }
+ * - updateTicket(id, patch): PATCH /api/tickets/:id
+ * - clearAll(): DELETE /api/tickets/clear?event=:eventId
+ */
+export function useApiQueue(eventId) {
     const [queue, setQueue] = useState([]);
-    const [settings, setSettings] = useState({
-        branchName: "NU Sanskriti",
-        avgMinutesPerTicket: 3,
-    });
-    const [admin, setAdmin] = useState({ pinHash: null });
-
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(false);
     const [mutating, setMutating] = useState(false);
     const [error, setError] = useState(null);
-
-    // If you deploy API under the same domain, keep this empty string.
-    // If your API is elsewhere, set BASE_URL = "https://your-api.example.com"
-    const BASE_URL = "";
-
     const controllerRef = useRef(null);
 
     const parseData = (json) => {
         if (!json) return [];
-        // handle { data: [...] } or { data: {...} } or raw array
         if (Array.isArray(json)) return json;
         if (Array.isArray(json.data)) return json.data;
         if (json.data && typeof json.data === "object") return [json.data];
@@ -28,29 +23,33 @@ export function useApiQueue() {
     };
 
     const fetchQueue = async () => {
+        if (!eventId) {
+            setQueue([]);
+            return;
+        }
         setError(null);
         controllerRef.current?.abort?.();
         const controller = new AbortController();
         controllerRef.current = controller;
-
         try {
             setLoading(true);
-            const res = await fetch(`${BASE_URL}/api/tickets`, {
+            const res = await fetch(`/api/tickets?event=${encodeURIComponent(eventId)}`, {
                 signal: controller.signal,
-                headers: { "Accept": "application/json" },
+                headers: { Accept: "application/json" },
             });
-            if (!res.ok) {
-                throw new Error(`GET /api/tickets failed: ${res.status} ${res.statusText}`);
-            }
             const json = await res.json().catch(() => ({}));
-            const data = parseData(json);
-            // Sort by number ascending if your API doesn't already
-            data.sort((a, b) => (a.number ?? 0) - (b.number ?? 0));
+            if (!res.ok) throw new Error(json?.error || `GET /api/tickets ${res.status}`);
+            const data = parseData(json)
+                .map((t) => ({
+                    ...t,
+                    createdAt: t.createdAt || t.created_at, // normalize for UI
+                }))
+                .sort((a, b) => (a.number ?? 0) - (b.number ?? 0));
             setQueue(data);
-        } catch (err) {
-            if (err.name !== "AbortError") {
-                console.error(err);
-                setError(err.message || "Failed to load queue");
+        } catch (e) {
+            if (e.name !== "AbortError") {
+                console.error(e);
+                setError(e.message || "Failed to load queue");
             }
         } finally {
             setLoading(false);
@@ -58,28 +57,37 @@ export function useApiQueue() {
     };
 
     const addTicket = async (name) => {
+        if (!eventId) return null;
         setError(null);
         setMutating(true);
         try {
-            const res = await fetch(`${BASE_URL}/api/tickets`, {
+            const res = await fetch(`/api/tickets`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json", "Accept": "application/json" },
-                body: JSON.stringify({ name }),
+                headers: { "Content-Type": "application/json", Accept: "application/json" },
+                body: JSON.stringify({ name, event_id: eventId }),
             });
-            if (!res.ok) {
-                throw new Error(`POST /api/tickets failed: ${res.status} ${res.statusText}`);
-            }
             const json = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(json?.error || `POST /api/tickets ${res.status}`);
             const data = parseData(json);
             const created = data[0] ?? null;
 
-            // Optimistic append (optional), then refetch to be consistent
-            if (created) setQueue((prev) => [...prev, created]);
+            // Fallback to submitted name if API doesn't echo it
+            if (created && !created.name) created.name = name;
+
+            // Optimistic: append, then refetch
+            if (created) {
+                setQueue((prev) =>
+                    [...prev, { ...created, createdAt: created.createdAt || created.created_at }].sort(
+                        (a, b) => (a.number ?? 0) - (b.number ?? 0)
+                    )
+                );
+            }
+            // Keep source of truth in sync
             await fetchQueue();
             return created;
-        } catch (err) {
-            console.error(err);
-            setError(err.message || "Failed to add ticket");
+        } catch (e) {
+            console.error(e);
+            setError(e.message || "Failed to add ticket");
             return null;
         } finally {
             setMutating(false);
@@ -87,86 +95,58 @@ export function useApiQueue() {
     };
 
     const updateTicket = async (id, patch) => {
+        if (!id) return;
         setError(null);
         setMutating(true);
         try {
-            const res = await fetch(`${BASE_URL}/api/tickets/${id}`, {
+            const res = await fetch(`/api/tickets/${id}`, {
                 method: "PATCH",
-                headers: { "Content-Type": "application/json", "Accept": "application/json" },
+                headers: { "Content-Type": "application/json", Accept: "application/json" },
                 body: JSON.stringify(patch),
             });
-            if (!res.ok) {
-                throw new Error(`PATCH /api/tickets/${id} failed: ${res.status} ${res.statusText}`);
-            }
-            // You can parse response and update locally, but a refetch keeps source of truth
+            const json = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(json?.error || `PATCH /api/tickets/${id} ${res.status}`);
+            // Simple approach: refetch
             await fetchQueue();
-        } catch (err) {
-            console.error(err);
-            setError(err.message || "Failed to update ticket");
-        } finally {
-            setMutating(false);
-        }
-    };
-
-    const removeTicket = async (id) => {
-        setError(null);
-        setMutating(true);
-        try {
-            const res = await fetch(`${BASE_URL}/api/tickets/${id}`, {
-                method: "DELETE",
-                headers: { "Accept": "application/json" },
-            });
-            if (!res.ok) {
-                throw new Error(`DELETE /api/tickets/${id} failed: ${res.status} ${res.statusText}`);
-            }
-            await fetchQueue();
-        } catch (err) {
-            console.error(err);
-            setError(err.message || "Failed to remove ticket");
+        } catch (e) {
+            console.error(e);
+            setError(e.message || "Failed to update ticket");
         } finally {
             setMutating(false);
         }
     };
 
     const clearAll = async () => {
-        if (!confirm("Clear all tickets?")) return;
+        if (!eventId) return;
+        if (!confirm("Clear ALL tickets for this event?")) return;
         setError(null);
         setMutating(true);
         try {
-            const res = await fetch(`${BASE_URL}/api/tickets/clear`, {
+            const res = await fetch(`/api/tickets/clear?event=${encodeURIComponent(eventId)}`, {
                 method: "DELETE",
-                headers: { "Accept": "application/json" },
+                headers: { Accept: "application/json" },
             });
-            if (!res.ok) {
-                throw new Error(`DELETE /api/tickets/clear failed: ${res.status} ${res.statusText}`);
-            }
+            const json = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(json?.error || `DELETE /api/tickets/clear ${res.status}`);
             await fetchQueue();
-        } catch (err) {
-            console.error(err);
-            setError(err.message || "Failed to clear tickets");
+        } catch (e) {
+            console.error(e);
+            setError(e.message || "Failed to clear tickets");
         } finally {
             setMutating(false);
         }
     };
 
-    // Settings/Admin still local (or wire to API later if needed)
-    const saveSettings = (patch) => setSettings((prev) => ({ ...prev, ...patch }));
-    const setAdminPinHash = (pinHash) => setAdmin({ pinHash });
-
     const reload = () => fetchQueue();
 
     useEffect(() => {
         fetchQueue();
-
-        // Optional: refetch when tab becomes active again
+        // Optional: refetch when tab becomes active
         const onVis = () => document.visibilityState === "visible" && fetchQueue();
         document.addEventListener("visibilitychange", onVis);
         return () => document.removeEventListener("visibilitychange", onVis);
-
-        // Optional: polling
-        // const id = setInterval(fetchQueue, 5000);
-        // return () => clearInterval(id);
-    }, []);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [eventId]);
 
     return {
         queue,
@@ -175,12 +155,12 @@ export function useApiQueue() {
         error,
         addTicket,
         updateTicket,
-        removeTicket,
         clearAll,
-        settings,
-        saveSettings,
-        admin,
-        setAdminPinHash,
         reload,
+        // settings/admin are now event-agnostic in DB world; keep placeholders if UI needs them
+        settings: { branchName: "Event", avgMinutesPerTicket: 3 },
+        saveSettings: () => { },
+        admin: { pinHash: null },
+        setAdminPinHash: () => { },
     };
 }
