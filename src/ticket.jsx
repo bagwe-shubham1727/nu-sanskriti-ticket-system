@@ -340,11 +340,13 @@ function ClientPage({ queue, addTicket, settings }) {
     [queue]
   );
 
-  const handleTakeTicket = (e) => {
+  const handleTakeTicket = async (e) => {
     e.preventDefault();
     if (!name.trim()) return;
-    const t = addTicket(name);
-    setMyTicket(t);
+
+    const created = await addTicket(name); // <-- await the API
+    if (created) setMyTicket(created); // now has .name and .number
+
     setName("");
   };
 
