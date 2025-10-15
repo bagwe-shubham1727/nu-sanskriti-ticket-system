@@ -1,5 +1,16 @@
 import { supabase } from "../config.js";
 
+function getBody(req) {
+    try {
+        if (!req.body) return {};
+        if (typeof req.body === "string") return JSON.parse(req.body);
+        if (typeof req.body === "object") return req.body;
+        return {};
+    } catch {
+        return {};
+    }
+}
+
 export default async function handler(req, res) {
     if (req.method === "GET") {
         const { data, error } = await supabase
@@ -12,22 +23,17 @@ export default async function handler(req, res) {
     }
 
     if (req.method === "POST") {
-        try {
-            const { name } = JSON.parse(req.body || "{}");
-            if (!name || !name.trim()) {
-                return res.status(400).json({ error: "Name is required" });
-            }
+        const body = getBody(req);
+        const name = (body.name || "").trim();
+        if (!name) return res.status(400).json({ error: "Name is required" });
 
-            const { data, error } = await supabase
-                .from("tickets")
-                .insert([{ name: name.trim() }])
-                .select("id, number, name, status, created_at");
+        const { data, error } = await supabase
+            .from("tickets")
+            .insert([{ name }])
+            .select("id, number, name, status, created_at");
 
-            if (error) return res.status(500).json({ error: error.message });
-            return res.status(201).json({ data });
-        } catch (e) {
-            return res.status(400).json({ error: "Invalid JSON body" });
-        }
+        if (error) return res.status(500).json({ error: error.message });
+        return res.status(201).json({ data });
     }
 
     res.setHeader("Allow", "GET, POST");
