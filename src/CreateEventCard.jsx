@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { useEvents } from "../hooks/useEvents";
+import { useEvents } from "./useEvents";
 
 export default function CreateEventCard({ onCreated }) {
   const { createEvent, events } = useEvents(); // ← note: added `events` here
