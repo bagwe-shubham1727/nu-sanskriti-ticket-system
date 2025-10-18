@@ -412,13 +412,13 @@ function AdminPage({
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => updateTicket(t.id, { status: "done" })}
-                      className="px-3 py-1.5 rounded-lg text-sm bg-green-600 text-white hover:bg-green-700"
+                      className="px-3 py-1.5 rounded-lg text-sm bg-green-600 text-black hover:bg-green-700"
                     >
                       Complete
                     </button>
                     <button
                       onClick={() => updateTicket(t.id, { status: "canceled" })}
-                      className="px-3 py-1.5 rounded-lg text-sm bg-rose-600 text-white hover:bg-rose-700"
+                      className="px-3 py-1.5 rounded-lg text-sm bg-rose-600 text-black hover:bg-rose-700"
                     >
                       Cancel
                     </button>
